@@ -185,3 +185,83 @@ Add a `.github/workflows/publish-docs.yml` that triggers on changes to `docs/sha
 - Audit who accessed shared links (Azure provides this)
 - Use branch protection on the source docs folder
 - Review what's in `docs/shared/` before enabling auto-publish
+
+---
+
+## Developer Setup & Usage (bydynamics)
+
+Our implementation uses **GitHub Pages** on `bydynamics/shared-docs` with a global PowerShell function.
+
+### One-Time Setup
+
+1. Install [GitHub CLI](https://cli.github.com/) and authenticate:
+   ```
+   gh auth login
+   ```
+
+2. Add this function to your PowerShell profile (`notepad $PROFILE`):
+
+```powershell
+# --- bydynamics: Publish MD files to GitHub Pages ---
+function publish-to-pages {
+    param(
+        [Parameter(Mandatory)][string]$File,
+        [string]$Name,
+        [switch]$Remove
+    )
+    $scriptB64 = gh api repos/bydynamics/shared-docs/contents/publish-to-pages.ps1 --jq '.content' 2>$null
+    if (-not $scriptB64) { Write-Error "Failed to download script. Check gh auth."; return }
+    $scriptContent = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($scriptB64))
+    $tempFile = Join-Path $env:TEMP "publish-to-pages.ps1"
+    Set-Content -Path $tempFile -Value $scriptContent -Encoding UTF8
+    $params = @{ File = $File }
+    if ($Name) { $params.Name = $Name }
+    if ($Remove) { $params.Remove = $true }
+    & $tempFile @params
+}
+# --- end bydynamics publish-to-pages ---
+```
+
+3. Reload your profile:
+   ```
+   . $PROFILE
+   ```
+
+### Usage
+
+**Publish a file** (from any repo, any folder):
+```powershell
+publish-to-pages -File "docs\my-plan.md"
+```
+
+**Publish with custom name**:
+```powershell
+publish-to-pages -File "docs\my-plan.md" -Name "customer-project-plan.md"
+```
+
+**Update a file** (just run the same command again — overwrites):
+```powershell
+publish-to-pages -File "docs\my-plan.md"
+```
+
+**Remove a published file**:
+```powershell
+publish-to-pages -File "customer-project-plan.md" -Remove
+```
+
+### Result
+
+Customer-shareable URL: `https://bydynamics.github.io/shared-docs/<filename>`
+
+| Source file | Customer URL |
+|-------------|--------------|
+| `my plan.md` | https://bydynamics.github.io/shared-docs/my-plan |
+| `api-spec.md` | https://bydynamics.github.io/shared-docs/api-spec |
+
+### Notes
+
+- Only `.md` files supported
+- Spaces in filenames become hyphens automatically
+- Content is **public** — never publish secrets or credentials
+- The function auto-downloads the latest script each run (self-updating)
+- Pages rebuild takes ~30 seconds after publish
