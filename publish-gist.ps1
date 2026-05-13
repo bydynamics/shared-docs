@@ -109,71 +109,29 @@ if (-not $content) {
     return
 }
 
-# --- Upload embedded images and rewrite references ---
-$ghToken = $null
-try { $ghToken = (gh auth token 2>$null) } catch {}
+# --- Detect local images ---
+$imagePattern = '!\[([^\]]*)\]\(([^)]+)\)'
+$imageMatches = [regex]::Matches($content, $imagePattern)
+$localImages = @()
 
-if ($ghToken) {
-    $ghHeaders = @{
-        Authorization = "token $ghToken"
-        Accept        = "application/vnd.github+json"
+foreach ($m in $imageMatches) {
+    $imgPath = $m.Groups[2].Value -replace '\s*"[^"]*"\s*$', '' # strip optional title
+    $imgPath = $imgPath.Trim()
+
+    # Skip URLs and data URIs
+    if ($imgPath -match '^(https?://|data:)') { continue }
+
+    # Resolve relative to the file's directory
+    $localImg = Join-Path $fileDir $imgPath
+    if (-not (Test-Path $localImg)) {
+        Write-Warning "Image not found, skipping: $imgPath"
+        continue
     }
 
-    # Match markdown image syntax: ![alt](path) — skip http/https URLs
-    $imagePattern = '!\[([^\]]*)\]\(([^)]+)\)'
-    $matches = [regex]::Matches($content, $imagePattern)
-
-    foreach ($m in $matches) {
-        $imgPath = $m.Groups[2].Value -replace '"[^"]*"$', '' # strip optional title
-        $imgPath = $imgPath.Trim()
-
-        # Skip URLs and data URIs
-        if ($imgPath -match '^(https?://|data:)') { continue }
-
-        # Resolve relative to the file's directory
-        $localImg = Join-Path $fileDir $imgPath
-        if (-not (Test-Path $localImg)) {
-            Write-Warning "Image not found, skipping: $imgPath"
-            continue
-        }
-
-        $resolvedImg = Resolve-Path $localImg
-        $imgFileName = Split-Path $resolvedImg -Leaf
-        $imgBytes = [System.IO.File]::ReadAllBytes($resolvedImg)
-        $imgB64 = [Convert]::ToBase64String($imgBytes)
-
-        # Upload to bydynamics/shared-docs/gist-images/<filename>
-        $targetPath = "gist-images/$imgFileName"
-        $uploadUri = "https://api.github.com/repos/bydynamics/shared-docs/contents/$targetPath"
-
-        # Check if file already exists (need SHA to update)
-        $existingSha = $null
-        try {
-            $existing = Invoke-RestMethod -Uri $uploadUri -Headers $ghHeaders -Method Get -ErrorAction Stop
-            $existingSha = $existing.sha
-        } catch {}
-
-        $uploadBody = @{
-            message = "Upload gist image: $imgFileName"
-            content = $imgB64
-        }
-        if ($existingSha) { $uploadBody.sha = $existingSha }
-
-        try {
-            $uploadResult = Invoke-RestMethod -Uri $uploadUri -Headers $ghHeaders -Method Put -Body ($uploadBody | ConvertTo-Json) -ContentType "application/json"
-            $rawUrl = "https://raw.githubusercontent.com/bydynamics/shared-docs/main/$targetPath"
-            # Replace the local path with the public URL in content
-            $content = $content.Replace($m.Groups[2].Value, $rawUrl)
-            Write-Host "  Uploaded image: $imgFileName -> $rawUrl" -ForegroundColor DarkGray
-        } catch {
-            Write-Warning "Failed to upload image '$imgFileName': $_"
-        }
-    }
-}
-else {
-    # Check if there are local images that can't be uploaded
-    if ($content -match '!\[[^\]]*\]\((?!https?://|data:)') {
-        Write-Warning "Local images detected but 'gh' CLI not authenticated. Images won't render in the gist."
+    $localImages += @{
+        OriginalRef = $m.Groups[2].Value
+        LocalPath   = (Resolve-Path $localImg).Path
+        FileName    = Split-Path (Resolve-Path $localImg).Path -Leaf
     }
 }
 
@@ -184,17 +142,49 @@ $existing = $gists | Where-Object { $_.files.PSObject.Properties.Name -contains 
 if ($existing) {
     # Update existing gist
     $gistId = $existing[0].id
-    $body = @{
-        description = if ($Description) { $Description } else { $existing[0].description }
-        files       = @{ $fileName = @{ content = $content } }
-    } | ConvertTo-Json -Depth 5
+    $gistUrl = $existing[0].html_url
 
-    $result = Invoke-RestMethod -Uri "https://api.github.com/gists/$gistId" -Headers $headers -Method Patch -Body $body -ContentType "application/json"
-    Write-Host "Updated gist:" -ForegroundColor Green
-    Write-Host "  $($result.html_url)" -ForegroundColor Cyan
+    # If there are local images, push them via git first to get raw URLs
+    if ($localImages.Count -gt 0) {
+        $tempClone = Join-Path $env:TEMP "gist-clone-$gistId"
+        if (Test-Path $tempClone) { Remove-Item $tempClone -Recurse -Force }
+
+        $cloneUrl = "https://bydynamics-shared:$pat@gist.github.com/$gistId.git"
+        git clone $cloneUrl $tempClone 2>$null | Out-Null
+
+        foreach ($img in $localImages) {
+            Copy-Item $img.LocalPath (Join-Path $tempClone $img.FileName) -Force
+            $rawUrl = "https://gist.githubusercontent.com/bydynamics-shared/$gistId/raw/$($img.FileName)"
+            $content = $content.Replace($img.OriginalRef, $rawUrl)
+            Write-Host "  Image: $($img.FileName)" -ForegroundColor DarkGray
+        }
+
+        # Update the markdown file in the clone too
+        Set-Content -Path (Join-Path $tempClone $fileName) -Value $content -Encoding UTF8
+
+        Push-Location $tempClone
+        git add -A 2>$null | Out-Null
+        git commit -m "Update with images" 2>$null | Out-Null
+        git push 2>$null | Out-Null
+        Pop-Location
+
+        Remove-Item $tempClone -Recurse -Force -ErrorAction SilentlyContinue
+        Write-Host "Updated gist (with images):" -ForegroundColor Green
+        Write-Host "  $gistUrl" -ForegroundColor Cyan
+    }
+    else {
+        $body = @{
+            description = if ($Description) { $Description } else { $existing[0].description }
+            files       = @{ $fileName = @{ content = $content } }
+        } | ConvertTo-Json -Depth 5
+
+        $result = Invoke-RestMethod -Uri "https://api.github.com/gists/$gistId" -Headers $headers -Method Patch -Body $body -ContentType "application/json"
+        Write-Host "Updated gist:" -ForegroundColor Green
+        Write-Host "  $($result.html_url)" -ForegroundColor Cyan
+    }
 }
 else {
-    # Create new gist
+    # Create new gist (text only first)
     $body = @{
         description = $Description
         public      = [bool]$Public
@@ -202,9 +192,41 @@ else {
     } | ConvertTo-Json -Depth 5
 
     $result = Invoke-RestMethod -Uri "https://api.github.com/gists" -Headers $headers -Method Post -Body $body -ContentType "application/json"
+    $gistId = $result.id
+    $gistUrl = $result.html_url
     $vis = if ($Public) { "public" } else { "secret" }
-    Write-Host "Created $vis gist:" -ForegroundColor Green
-    Write-Host "  $($result.html_url)" -ForegroundColor Cyan
+
+    # If there are local images, clone and push them
+    if ($localImages.Count -gt 0) {
+        $tempClone = Join-Path $env:TEMP "gist-clone-$gistId"
+        if (Test-Path $tempClone) { Remove-Item $tempClone -Recurse -Force }
+
+        $cloneUrl = "https://bydynamics-shared:$pat@gist.github.com/$gistId.git"
+        git clone $cloneUrl $tempClone 2>$null | Out-Null
+
+        foreach ($img in $localImages) {
+            Copy-Item $img.LocalPath (Join-Path $tempClone $img.FileName) -Force
+            $rawUrl = "https://gist.githubusercontent.com/bydynamics-shared/$gistId/raw/$($img.FileName)"
+            $content = $content.Replace($img.OriginalRef, $rawUrl)
+            Write-Host "  Image: $($img.FileName)" -ForegroundColor DarkGray
+        }
+
+        # Rewrite the markdown with correct image URLs
+        Set-Content -Path (Join-Path $tempClone $fileName) -Value $content -Encoding UTF8
+
+        Push-Location $tempClone
+        git add -A 2>$null | Out-Null
+        git commit -m "Add images" 2>$null | Out-Null
+        git push 2>$null | Out-Null
+        Pop-Location
+
+        Remove-Item $tempClone -Recurse -Force -ErrorAction SilentlyContinue
+        Write-Host "Created $vis gist (with images):" -ForegroundColor Green
+    }
+    else {
+        Write-Host "Created $vis gist:" -ForegroundColor Green
+    }
+    Write-Host "  $gistUrl" -ForegroundColor Cyan
 }
 
 Write-Host "  Filename: $fileName" -ForegroundColor Gray
