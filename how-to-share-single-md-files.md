@@ -1,340 +1,155 @@
-# How to Share Single MD Files from a Private/Internal Repository with Customers
+# bydynamics Gist Sharing — Developer Guide
 
-## Problem
+Share markdown files (with images) from any repo as company-branded gists under **`bydynamics-shared`**.
 
-You have a private or internal GitHub repository and want to share specific `.md` files with external customers — without exposing the entire repo.
-
----
-
-## Options
-
-### 1. GitHub Gists (Simplest)
-
-- Create a **secret gist** (unlisted URL, not indexed, but accessible to anyone with the link)
-- Or a **public gist** if discoverability is fine
-- Copy the MD content into a gist and share the URL
-- Supports rendered Markdown preview
-
-**Pros**: Zero setup, instant sharing, version history  
-**Cons**: Manual copy/sync, no access control beyond "has the link", no folder structure
+![Gist example on bydynamics-shared](gist-example.png)
 
 ---
 
-### 2. GitHub Pages (Static Site from a Public Repo)
+## One-Time Setup
 
-- Create a separate **public** repo (e.g., `bydynamics/docs-public`)
-- Copy or auto-publish selected MD files there
-- Enable GitHub Pages → files render as a website
-- Share the Pages URL with customers
-
-**Automation option**: GitHub Action in private repo that copies specific files to the public repo on push.
-
-```yaml
-# .github/workflows/publish-docs.yml
-name: Publish Selected Docs
-on:
-  push:
-    paths:
-      - 'docs/shared/**'
-jobs:
-  publish:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: cpina/github-action-push-to-another-repository@main
-        env:
-          API_TOKEN_GITHUB: ${{ secrets.DOCS_PUBLISH_PAT }}
-        with:
-          source-directory: 'docs/shared'
-          destination-github-username: 'bydynamics'
-          destination-repository-name: 'docs-public'
-          target-branch: main
-```
-
-**Pros**: Automated, rendered HTML, custom domain possible  
-**Cons**: Requires second repo, all published content is public
-
----
-
-### 3. Fine-Grained Personal Access Token + Raw URL (Quick & Dirty)
-
-- Generate a fine-grained PAT with `contents: read` on the specific repo
-- Share the raw file URL with token embedded (NOT recommended for security)
-- Better: build a tiny proxy/redirect that authenticates on behalf of the customer
-
-**Verdict**: Avoid — tokens leak, no audit trail, expires
-
----
-
-### 4. GitHub Repository Collaborator (Per-File Not Possible)
-
-- GitHub does not support per-file permissions
-- You can invite a customer as an **outside collaborator** with `read` access — but they see the entire repo
-- Use a dedicated "shared docs" repo if you go this route
-
-**Pros**: Native GitHub access, no extra tooling  
-**Cons**: Exposes full repo or requires separate repo
-
----
-
-### 5. Share via Rendered URL Services
-
-Use third-party services that render raw GitHub MD files:
-
-| Service | URL Pattern | Notes |
-|---------|-------------|-------|
-| **github.com raw** | `https://raw.githubusercontent.com/...` | Only works for public repos |
-| **htmlpreview.github.io** | Wraps raw HTML | Public repos only |
-| **MarkdownShare** | Upload/paste | No repo link needed |
-
-**For private repos** — none of these work without authentication.
-
----
-
-### 6. Azure Blob Storage + Static Website (Best for Customers)
-
-- Publish selected MD files (rendered to HTML) to Azure Blob Storage static website
-- Optionally gate with Azure AD / SAS tokens for access control
-- Automate with GitHub Action → render MD to HTML → upload to blob
-
-```yaml
-# .github/workflows/publish-to-azure.yml
-name: Publish Docs to Azure
-on:
-  push:
-    paths:
-      - 'docs/customer/**'
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Convert MD to HTML
-        run: |
-          npm install -g marked
-          for f in docs/customer/*.md; do
-            marked "$f" > "${f%.md}.html"
-          done
-      - uses: azure/login@v2
-        with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
-      - name: Upload to Blob
-        run: |
-          az storage blob upload-batch \
-            --account-name bydynamicsdocs \
-            --destination '$web' \
-            --source docs/customer/ \
-            --pattern '*.html' \
-            --overwrite
-```
-
-**Pros**: Access control (SAS tokens, Entra ID), custom domain, scalable  
-**Cons**: Azure cost (minimal), setup effort
-
----
-
-### 7. Email/Teams Share with Auto-Export (Pragmatic)
-
-- GitHub Action converts specific MD files to PDF on push
-- Attach or upload to a shared Teams channel / SharePoint folder
-
-```yaml
-- name: Convert to PDF
-  uses: BaileyJM02/markdown-to-pdf@v1
-  with:
-    input_path: docs/customer/plan.md
-    output_dir: output/
-- name: Upload to SharePoint
-  # Use Microsoft Graph API or Power Automate webhook
-```
-
----
-
-## Recommended Approach for bydynamics
-
-| Scenario | Recommendation |
-|----------|---------------|
-| Quick one-off share | **Gist** (secret, share link) |
-| Ongoing customer docs | **Separate public/internal repo** + GitHub Pages |
-| Access-controlled sharing | **Azure Blob static site** with SAS tokens |
-| Internal between repos | **GitHub Action** cross-repo publish |
-| Customer portal | Azure Static Web App + Entra ID auth |
-
----
-
-## Folder Convention (Private Repo)
+### 1. Install GitHub CLI
 
 ```
-repo-root/
-├── docs/
-│   ├── internal/       # Never shared
-│   ├── shared/         # Auto-published to public repo or Azure
-│   └── customer/       # Per-customer folders
-│       ├── contoso/
-│       └── fabrikam/
+winget install GitHub.cli
+gh auth login
 ```
 
-Add a `.github/workflows/publish-docs.yml` that triggers on changes to `docs/shared/**` or `docs/customer/**`.
+### 2. Store the PAT
 
----
-
-## Security Considerations
-
-- Never embed tokens/secrets in shared URLs
-- Prefer time-limited SAS tokens for Azure Blob
-- Audit who accessed shared links (Azure provides this)
-- Use branch protection on the source docs folder
-- Review what's in `docs/shared/` before enabling auto-publish
-
----
-
-## Developer Setup & Usage (bydynamics)
-
-Our implementation uses **GitHub Pages** on `bydynamics/shared-docs` with a global PowerShell function.
-
-### One-Time Setup
-
-1. Install [GitHub CLI](https://cli.github.com/) and authenticate:
-   ```
-   gh auth login
-   ```
-
-2. Add this function to your PowerShell profile (`notepad $PROFILE`):
+Get the `bydynamics-shared` PAT from the team vault (scope: `gist` only), then:
 
 ```powershell
-# --- bydynamics: Publish MD files to GitHub Pages ---
-function publish-to-pages {
-    param(
-        [Parameter(Mandatory)][string]$File,
-        [string]$Name,
-        [switch]$Remove
-    )
-    $scriptB64 = gh api repos/bydynamics/shared-docs/contents/publish-to-pages.ps1 --jq '.content' 2>$null
-    if (-not $scriptB64) { Write-Error "Failed to download script. Check gh auth."; return }
-    $scriptContent = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($scriptB64))
-    $tempFile = Join-Path $env:TEMP "publish-to-pages.ps1"
-    Set-Content -Path $tempFile -Value $scriptContent -Encoding UTF8
-    $params = @{ File = $File }
-    if ($Name) { $params.Name = $Name }
-    if ($Remove) { $params.Remove = $true }
-    & $tempFile @params
+[System.Environment]::SetEnvironmentVariable('BDY_GIST_PAT', '<pat-from-vault>', 'User')
+```
+
+### 3. Add to your PowerShell profile
+
+Run `notepad $PROFILE` and add:
+
+```powershell
+# --- bydynamics: Ensure BDY_GIST_PAT is loaded from User env ---
+if (-not $env:BDY_GIST_PAT) {
+    $env:BDY_GIST_PAT = [System.Environment]::GetEnvironmentVariable('BDY_GIST_PAT', 'User')
 }
-# --- end bydynamics publish-to-pages ---
+
+# --- bydynamics: Publish gists under bydynamics-shared account ---
+function publish-gist {
+    param(
+        [string]$File,
+        [string]$Name,
+        [string]$Description,
+        [switch]$Public,
+        [switch]$Remove,
+        [switch]$List
+    )
+    $scriptPath = Join-Path $env:TEMP "publish-gist.ps1"
+    $scriptB64 = gh api repos/bydynamics/shared-docs/contents/publish-gist.ps1 --jq '.content' 2>$null
+    if (-not $scriptB64) { Write-Error "Failed to download publish-gist script. Check gh auth."; return }
+    $scriptContent = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(($scriptB64 -replace "\s","")))
+    Set-Content -Path $scriptPath -Value $scriptContent -Encoding UTF8
+    $params = @{}
+    if ($File) { $params.File = $File }
+    if ($Name) { $params.Name = $Name }
+    if ($Description) { $params.Description = $Description }
+    if ($Public) { $params.Public = $true }
+    if ($Remove) { $params.Remove = $true }
+    if ($List) { $params.List = $true }
+    & $scriptPath @params
+}
+# --- end bydynamics publish-gist ---
 ```
 
-3. Reload your profile:
-   ```
-   . $PROFILE
-   ```
+### 4. Reload
 
-### Usage
-
-**Publish a file** (from any repo, any folder):
 ```powershell
-publish-to-pages -File "docs\my-plan.md"
+. $PROFILE
 ```
-
-**Publish with custom name**:
-```powershell
-publish-to-pages -File "docs\my-plan.md" -Name "customer-project-plan.md"
-```
-
-**Update a file** (just run the same command again — overwrites):
-```powershell
-publish-to-pages -File "docs\my-plan.md"
-```
-
-**Remove a published file**:
-```powershell
-publish-to-pages -File "customer-project-plan.md" -Remove
-```
-
-### Result
-
-Customer-shareable URL: `https://bydynamics.github.io/shared-docs/<filename>`
-
-| Source file | Customer URL |
-|-------------|--------------|
-| `my plan.md` | https://bydynamics.github.io/shared-docs/my-plan |
-| `api-spec.md` | https://bydynamics.github.io/shared-docs/api-spec |
-
-### Notes
-
-- Only `.md` files supported
-- Spaces in filenames become hyphens automatically
-- Content is **public** — never publish secrets or credentials
-- The function auto-downloads the latest script each run (self-updating)
-- Pages rebuild takes ~30 seconds after publish
 
 ---
 
-## Gist Sharing (bydynamics-shared account)
+## Usage
 
-For quick, branded gist sharing we use a dedicated GitHub account: **`bydynamics-shared`**.
+### Publish a gist (secret/unlisted by default)
 
-Gists appear under `https://gist.github.com/bydynamics-shared/...` — company-branded, not personal.
-
-### One-Time Setup (per developer)
-
-1. Get the `bydynamics-shared` PAT from the team vault (scope: `gist` only)
-
-2. Store it as a **user-level** environment variable:
-   ```powershell
-   [System.Environment]::SetEnvironmentVariable('BDY_GIST_PAT', '<pat-from-vault>', 'User')
-   ```
-
-3. Restart your terminal (or open a new one)
-
-4. Add the `publish-gist` function to your profile (if not already there via synced profile):
-   ```powershell
-   # Already in the shared PowerShell profile on OneDrive — just reload:
-   . $PROFILE
-   ```
-
-### Usage
-
-**Publish a gist** (secret/unlisted by default):
 ```powershell
 publish-gist -File "docs\plan.md" -Description "Project plan for Contoso"
 ```
 
-**Publish as public**:
+### Publish as public
+
 ```powershell
 publish-gist -File "docs\plan.md" -Public
 ```
 
-**Custom filename**:
+### Custom filename
+
 ```powershell
 publish-gist -File "docs\my-long-name.md" -Name "plan.md"
 ```
 
-**Update an existing gist** (same filename = auto-update):
+### Update an existing gist
+
+Same filename = auto-update:
+
 ```powershell
 publish-gist -File "docs\plan.md"
 ```
 
-**List all gists**:
+### List all gists
+
 ```powershell
 publish-gist -List
 ```
 
-**Delete a gist**:
+### Delete a gist
+
 ```powershell
 publish-gist -File "plan.md" -Remove
 ```
 
-### How It Works
+---
 
-- Uses the `BDY_GIST_PAT` env var to authenticate as `bydynamics-shared`
-- Script is stored in `bydynamics/shared-docs/publish-gist.ps1` (public repo)
-- Profile function auto-downloads the latest version each run
-- Creates/updates/deletes gists via the GitHub REST API
+## Images
 
-### Gist Account Details
+Local images referenced in your markdown are **automatically uploaded** to `bydynamics/shared-docs/gist-images/` and the markdown URLs are rewritten to `raw.githubusercontent.com`. Images render inline in the gist without appearing as extra files.
+
+Requirements:
+- `gh` CLI must be authenticated (used for image upload to shared-docs)
+- Images must use relative paths in the markdown (e.g. `![](screenshot.png)`)
+- HTTP URLs are left unchanged
+
+---
+
+## How It Works
+
+1. Reads your local `.md` file
+2. Detects local image references (`![alt](relative/path.png)`)
+3. Uploads images to `bydynamics/shared-docs/gist-images/` via GitHub API
+4. Rewrites image URLs to `raw.githubusercontent.com` in the content
+5. Creates or updates the gist via the GitHub REST API using `BDY_GIST_PAT`
+
+The gist appears at `https://gist.github.com/bydynamics-shared/<id>` — share this URL with customers.
+
+---
+
+## Details
 
 | Field | Value |
 |-------|-------|
-| Username | `bydynamics-shared` |
-| Purpose | Company-branded gist sharing |
+| Account | `bydynamics-shared` |
+| Gist URL pattern | `https://gist.github.com/bydynamics-shared/<id>` |
 | PAT scope | `gist` only |
-| PAT storage | `BDY_GIST_PAT` env var (user-level) |
+| PAT env var | `BDY_GIST_PAT` (user-level) |
+| Script source | `bydynamics/shared-docs/publish-gist.ps1` |
+| Image hosting | `bydynamics/shared-docs/gist-images/` |
+| Visibility default | Secret (unlisted — anyone with the link can view) |
+
+---
+
+## Tips
+
+- **Secret ≠ private** — anyone with the URL can view a secret gist, it's just not indexed/discoverable
+- Use `-Public` only if you want the gist to appear in searches and on the account profile
+- The script is self-updating — always pulls the latest from shared-docs
+- Works from any directory, any repo, any terminal
