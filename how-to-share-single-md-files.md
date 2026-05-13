@@ -326,7 +326,7 @@ publish-gist -File "plan.md" -Remove
 ### How It Works
 
 - Uses the `BDY_GIST_PAT` env var to authenticate as `bydynamics-shared`
-- Script is stored in `bydynamics/bydynamics-mindmap/.github/scripts/publish-gist.ps1`
+- Script is stored in `bydynamics/shared-docs/publish-gist.ps1` (public repo)
 - Profile function auto-downloads the latest version each run
 - Creates/updates/deletes gists via the GitHub REST API
 
