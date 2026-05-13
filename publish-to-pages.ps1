@@ -8,13 +8,8 @@
     Referenced images are automatically uploaded alongside the markdown.
 
 .EXAMPLE
-    # From any repo root:
     publish-to-pages -File "docs/my-plan.md"
-    
-    # With custom output name:
     publish-to-pages -File "docs/my-plan.md" -Name "customer-plan.md"
-
-    # Remove a published file (and its images):
     publish-to-pages -File "customer-plan.md" -Remove
 
 .NOTES
@@ -45,7 +40,6 @@ else {
         exit 1
     }
     $targetName = if ($Name) { $Name } else { (Split-Path $File -Leaf) -replace ' ', '-' }
-    # Ensure .md extension
     if ($targetName -notlike "*.md") { $targetName += ".md" }
 }
 
@@ -71,7 +65,6 @@ function Remove-RemoteFile {
 }
 
 if ($Remove) {
-    # Remove the markdown file
     $sha = gh api "repos/$targetRepo/contents/$targetName" --jq '.sha' 2>$null
     if (-not $sha) {
         Write-Error "File '$targetName' not found in $targetRepo"
@@ -81,7 +74,6 @@ if ($Remove) {
         ConvertTo-Json | gh api "repos/$targetRepo/contents/$targetName" --method DELETE --input - | Out-Null
     Write-Host "Removed: $targetName" -ForegroundColor Yellow
 
-    # Remove associated images folder
     $imgFiles = gh api "repos/$targetRepo/contents/$imgFolder" --jq '.[].path' 2>$null
     if ($imgFiles) {
         foreach ($imgPath in $imgFiles) {
@@ -102,15 +94,11 @@ else {
     $uploadedCount = 0
     foreach ($m in $matches_) {
         $rawRef = $m.Groups[1].Value
-        # Decode URL encoding for local file lookup
         $decodedRef = [System.Uri]::UnescapeDataString($rawRef)
-        # Skip absolute URLs (http/https/data)
         if ($decodedRef -match '^(https?://|data:)') { continue }
-        # Resolve local path relative to the markdown file
         $localImg = Join-Path $mdDir $decodedRef
         if (-not (Test-Path $localImg)) { continue }
 
-        # Target name: spaces and special chars → dashes for URL safety
         $imgName = (Split-Path $decodedRef -Leaf) -replace ' ', '-'
         $remotePath = "$imgFolder/$imgName"
 
@@ -118,12 +106,12 @@ else {
         $uploadedCount++
         Write-Host "  Uploaded: $remotePath" -ForegroundColor DarkCyan
 
-        # Rewrite the reference in markdown content
-        $newRef = "$imgFolder/$imgName"
+        # Use site-root-relative path so Jekyll permalink routing doesn't break it
+        $newRef = "/shared-docs/$imgFolder/$imgName"
         $mdContent = $mdContent.Replace($rawRef, $newRef)
     }
 
-    # Upload the (possibly modified) markdown
+    # Upload the modified markdown
     $mdBytes = [System.Text.Encoding]::UTF8.GetBytes($mdContent)
     $b64Content = [Convert]::ToBase64String($mdBytes)
     $sha = gh api "repos/$targetRepo/contents/$targetName" --jq '.sha' 2>$null
