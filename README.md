@@ -6,61 +6,83 @@ Public documentation published from private bydynamics repositories.
 
 ---
 
-## For Developers: How to Publish
+## For Developers: Setup (one-time)
+
+Add this to your PowerShell profile (`notepad $PROFILE`):
+
+```powershell
+# --- bydynamics: Publish MD files to GitHub Pages ---
+function publish-to-pages {
+    param(
+        [Parameter(Mandatory)][string]$File,
+        [string]$Name,
+        [switch]$Remove
+    )
+    $scriptB64 = gh api repos/bydynamics/shared-docs/contents/publish-to-pages.ps1 --jq '.content' 2>$null
+    if (-not $scriptB64) { Write-Error "Failed to download script. Check gh auth."; return }
+    $scriptContent = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($scriptB64))
+    $tempFile = Join-Path $env:TEMP "publish-to-pages.ps1"
+    Set-Content -Path $tempFile -Value $scriptContent -Encoding UTF8
+    $params = @{ File = $File }
+    if ($Name) { $params.Name = $Name }
+    if ($Remove) { $params.Remove = $true }
+    & $tempFile @params
+}
+# --- end bydynamics publish-to-pages ---
+```
+
+Then reload: `. $PROFILE`
 
 ### Prerequisites
 
-- [GitHub CLI](https://cli.github.com/) installed and authenticated (`gh auth login`)
-- Member of the **bydynamics** GitHub organization
+- [GitHub CLI](https://cli.github.com/) installed
+- Authenticated: `gh auth login`
+- Member of **bydynamics** org with repo access
 
-### Publish a file
+---
 
-From **any bydynamics repo**, run:
+## Usage
+
+### Publish a file (from any repo, any folder)
 
 ```powershell
-# One-liner: download script and publish a file
-Invoke-Expression (gh api repos/bydynamics/shared-docs/contents/publish-to-pages.ps1 --jq '.content' | ForEach-Object { [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String()) }); publish-to-pages -File "path\to\your-file.md"
+publish-to-pages -File "docs\my-plan.md"
 ```
 
-Or if you have the script locally (in `.github/scripts/`):
+### Custom output name
 
 ```powershell
-.\.github\scripts\publish-to-pages.ps1 -File "docs\my-plan.md"
-```
-
-### Custom filename
-
-```powershell
-.\.github\scripts\publish-to-pages.ps1 -File "docs\my-plan.md" -Name "customer-project-plan.md"
+publish-to-pages -File "docs\my-plan.md" -Name "customer-project-plan.md"
 ```
 
 ### Remove a published file
 
 ```powershell
-.\.github\scripts\publish-to-pages.ps1 -File "customer-project-plan.md" -Remove
+publish-to-pages -File "customer-project-plan.md" -Remove
 ```
-
-### What happens
-
-1. File gets pushed to `bydynamics/shared-docs` (this repo)
-2. GitHub Pages auto-rebuilds (~30 seconds)
-3. You get a shareable URL: `https://bydynamics.github.io/shared-docs/<filename>`
-
-### URL format
-
-| Source file | Published URL |
-|-------------|---------------|
-| `my plan.md` | `bydynamics.github.io/shared-docs/my-plan` |
-| `docs/api-spec.md` | `bydynamics.github.io/shared-docs/api-spec` |
-
-### Rules
-
-- Only `.md` files supported
-- Spaces in filenames are converted to hyphens
-- Anyone with the URL can view (public) — don't publish secrets
-- To unpublish, use `-Remove`
-- All published files are visible in this repo's file list
 
 ---
 
-*Script: [publish-to-pages.ps1](publish-to-pages.ps1)*
+## What happens
+
+1. Script downloads latest publish logic from this repo
+2. File gets pushed to `bydynamics/shared-docs`
+3. GitHub Pages auto-rebuilds (~30 seconds)
+4. You get a shareable URL
+
+### URL format
+
+| Source file | Customer URL |
+|-------------|--------------|
+| `my plan.md` | https://bydynamics.github.io/shared-docs/my-plan |
+| `api-spec.md` | https://bydynamics.github.io/shared-docs/api-spec |
+
+---
+
+## Rules
+
+- Only `.md` files
+- Spaces in filenames become hyphens
+- Content is **public** — don't publish secrets/credentials
+- Updates: just run the command again (overwrites)
+- Script always pulls latest version from this repo (auto-updating)
