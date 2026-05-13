@@ -265,3 +265,76 @@ Customer-shareable URL: `https://bydynamics.github.io/shared-docs/<filename>`
 - Content is **public** — never publish secrets or credentials
 - The function auto-downloads the latest script each run (self-updating)
 - Pages rebuild takes ~30 seconds after publish
+
+---
+
+## Gist Sharing (bydynamics-shared account)
+
+For quick, branded gist sharing we use a dedicated GitHub account: **`bydynamics-shared`**.
+
+Gists appear under `https://gist.github.com/bydynamics-shared/...` — company-branded, not personal.
+
+### One-Time Setup (per developer)
+
+1. Get the `bydynamics-shared` PAT from the team vault (scope: `gist` only)
+
+2. Store it as a **user-level** environment variable:
+   ```powershell
+   [System.Environment]::SetEnvironmentVariable('BDY_GIST_PAT', '<pat-from-vault>', 'User')
+   ```
+
+3. Restart your terminal (or open a new one)
+
+4. Add the `publish-gist` function to your profile (if not already there via synced profile):
+   ```powershell
+   # Already in the shared PowerShell profile on OneDrive — just reload:
+   . $PROFILE
+   ```
+
+### Usage
+
+**Publish a gist** (secret/unlisted by default):
+```powershell
+publish-gist -File "docs\plan.md" -Description "Project plan for Contoso"
+```
+
+**Publish as public**:
+```powershell
+publish-gist -File "docs\plan.md" -Public
+```
+
+**Custom filename**:
+```powershell
+publish-gist -File "docs\my-long-name.md" -Name "plan.md"
+```
+
+**Update an existing gist** (same filename = auto-update):
+```powershell
+publish-gist -File "docs\plan.md"
+```
+
+**List all gists**:
+```powershell
+publish-gist -List
+```
+
+**Delete a gist**:
+```powershell
+publish-gist -File "plan.md" -Remove
+```
+
+### How It Works
+
+- Uses the `BDY_GIST_PAT` env var to authenticate as `bydynamics-shared`
+- Script is stored in `bydynamics/bydynamics-mindmap/.github/scripts/publish-gist.ps1`
+- Profile function auto-downloads the latest version each run
+- Creates/updates/deletes gists via the GitHub REST API
+
+### Gist Account Details
+
+| Field | Value |
+|-------|-------|
+| Username | `bydynamics-shared` |
+| Purpose | Company-branded gist sharing |
+| PAT scope | `gist` only |
+| PAT storage | `BDY_GIST_PAT` env var (user-level) |
