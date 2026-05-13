@@ -100,12 +100,81 @@ if (-not (Test-Path $File)) {
 }
 
 $resolvedFile = Resolve-Path $File
+$fileDir = Split-Path $resolvedFile -Parent
 $fileName = if ($Name) { $Name } else { Split-Path $resolvedFile -Leaf }
 $content = Get-Content $resolvedFile -Raw -Encoding UTF8
 
 if (-not $content) {
     Write-Error "File is empty: $File"
     return
+}
+
+# --- Upload embedded images and rewrite references ---
+$ghToken = $null
+try { $ghToken = (gh auth token 2>$null) } catch {}
+
+if ($ghToken) {
+    $ghHeaders = @{
+        Authorization = "token $ghToken"
+        Accept        = "application/vnd.github+json"
+    }
+
+    # Match markdown image syntax: ![alt](path) — skip http/https URLs
+    $imagePattern = '!\[([^\]]*)\]\(([^)]+)\)'
+    $matches = [regex]::Matches($content, $imagePattern)
+
+    foreach ($m in $matches) {
+        $imgPath = $m.Groups[2].Value -replace '"[^"]*"$', '' # strip optional title
+        $imgPath = $imgPath.Trim()
+
+        # Skip URLs and data URIs
+        if ($imgPath -match '^(https?://|data:)') { continue }
+
+        # Resolve relative to the file's directory
+        $localImg = Join-Path $fileDir $imgPath
+        if (-not (Test-Path $localImg)) {
+            Write-Warning "Image not found, skipping: $imgPath"
+            continue
+        }
+
+        $resolvedImg = Resolve-Path $localImg
+        $imgFileName = Split-Path $resolvedImg -Leaf
+        $imgBytes = [System.IO.File]::ReadAllBytes($resolvedImg)
+        $imgB64 = [Convert]::ToBase64String($imgBytes)
+
+        # Upload to bydynamics/shared-docs/gist-images/<filename>
+        $targetPath = "gist-images/$imgFileName"
+        $uploadUri = "https://api.github.com/repos/bydynamics/shared-docs/contents/$targetPath"
+
+        # Check if file already exists (need SHA to update)
+        $existingSha = $null
+        try {
+            $existing = Invoke-RestMethod -Uri $uploadUri -Headers $ghHeaders -Method Get -ErrorAction Stop
+            $existingSha = $existing.sha
+        } catch {}
+
+        $uploadBody = @{
+            message = "Upload gist image: $imgFileName"
+            content = $imgB64
+        }
+        if ($existingSha) { $uploadBody.sha = $existingSha }
+
+        try {
+            $uploadResult = Invoke-RestMethod -Uri $uploadUri -Headers $ghHeaders -Method Put -Body ($uploadBody | ConvertTo-Json) -ContentType "application/json"
+            $rawUrl = "https://raw.githubusercontent.com/bydynamics/shared-docs/main/$targetPath"
+            # Replace the local path with the public URL in content
+            $content = $content.Replace($m.Groups[2].Value, $rawUrl)
+            Write-Host "  Uploaded image: $imgFileName -> $rawUrl" -ForegroundColor DarkGray
+        } catch {
+            Write-Warning "Failed to upload image '$imgFileName': $_"
+        }
+    }
+}
+else {
+    # Check if there are local images that can't be uploaded
+    if ($content -match '!\[[^\]]*\]\((?!https?://|data:)') {
+        Write-Warning "Local images detected but 'gh' CLI not authenticated. Images won't render in the gist."
+    }
 }
 
 # --- Check if gist already exists (update) ---
