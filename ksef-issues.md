@@ -19,23 +19,23 @@ This text must be included in the XML delivered to KSeF. A manually entered KSeF
 
 **KSeF invoice SIPO260143 — description shows "0":**
 
-![KSeF SIPO260143 missing description](img/ksef-issues/afbeelding-(2).png)
+![KSeF SIPO260143 missing description](/shared-docs/img/ksef-issues/afbeelding-(2).png)
 
 **BC Posted Sales Invoice SIPO260143 — actual description highlighted:**
 
-![BC SIPO260143 with description](img/ksef-issues/afbeelding-(3).png)
+![BC SIPO260143 with description](/shared-docs/img/ksef-issues/afbeelding-(3).png)
 
 **Reference: manually entered KSeF invoice SIPO260137 (correct):**
 
-![KSeF SIPO260137 reference](img/ksef-issues/afbeelding-(4).png)
+![KSeF SIPO260137 reference](/shared-docs/img/ksef-issues/afbeelding-(4).png)
 
 **Chat: Johan reporting missing invoice text + tax category:**
 
-![Chat missing description report](img/ksef-issues/Screenshot-2026-05-13-142101.png)
+![Chat missing description report](/shared-docs/img/ksef-issues/Screenshot-2026-05-13-142101.png)
 
 **BC Activity Log + XML for SIPO260143 — description missing in XML:**
 
-![Activity Log and XML SIPO260143](img/ksef-issues/Screenshot-2026-05-13-145519.png)
+![Activity Log and XML SIPO260143](/shared-docs/img/ksef-issues/Screenshot-2026-05-13-145519.png)
 
 ### Assessment
 
@@ -69,11 +69,11 @@ The bank account must be sourced from the posted sales invoice, not from company
 
 **BC invoice vs XML — bank account mismatch highlighted:**
 
-![Bank account mismatch BC vs XML](img/ksef-issues/image-(11).png)
+![Bank account mismatch BC vs XML](/shared-docs/img/ksef-issues/image-(11).png)
 
 **Chat: Johan reporting bank account issue:**
 
-![Chat bank account report](img/ksef-issues/Screenshot-2026-05-13-142132.png)
+![Chat bank account report](/shared-docs/img/ksef-issues/Screenshot-2026-05-13-142132.png)
 
 ### Assessment
 
@@ -108,11 +108,11 @@ The mapping should ensure the `ActualDeliveryDate` in the XML corresponds to the
 
 **Chat: Milena reporting date mismatch + missing description:**
 
-![Chat date and description issues](img/ksef-issues/image-(12).png)
+![Chat date and description issues](/shared-docs/img/ksef-issues/image-(12).png)
 
 **Chat: Johan + Milena discussing date of service provision and UoM:**
 
-![Chat delivery date and UoM](img/ksef-issues/Screenshot-2026-05-13-142152.png)
+![Chat delivery date and UoM](/shared-docs/img/ksef-issues/Screenshot-2026-05-13-142152.png)
 
 ### Assessment
 
@@ -152,11 +152,11 @@ Investigate where "XPP" is sourced from and ensure the correct UoM code is mappe
 
 **KSeF invoice SIPO260143 — UoM shows "XPP":**
 
-![XPP unit of measure](img/ksef-issues/afbeelding-(2).png)
+![XPP unit of measure](/shared-docs/img/ksef-issues/afbeelding-(2).png)
 
 **Reference: KSeF invoice SIPO260137 — UoM shows "szt." (correct):**
 
-![Correct UoM szt](img/ksef-issues/afbeelding-(4).png)
+![Correct UoM szt](/shared-docs/img/ksef-issues/afbeelding-(4).png)
 
 ### Assessment
 
@@ -188,7 +188,7 @@ The tax category is not rendered correctly in KSeF. This issue has been flagged 
 
 **Chat: Johan reporting tax category issue:**
 
-![Chat tax category report](img/ksef-issues/Screenshot-2026-05-13-142101.png)
+![Chat tax category report](/shared-docs/img/ksef-issues/Screenshot-2026-05-13-142101.png)
 
 ---
 
