@@ -110,14 +110,19 @@ if (-not $content) {
 }
 
 # --- Upload local images to shared-docs and rewrite references ---
+# Matches both markdown images ![alt](path) and HTML <img src="path"> tags
 $imagePattern = '!\[([^\]]*)\]\(([^)]+)\)'
-$imageMatches = [regex]::Matches($content, $imagePattern)
+$htmlImgPattern = '<img[^>]+src="([^"]+)"'
+$imageRefs = @()
+$imageRefs += [regex]::Matches($content, $imagePattern) | ForEach-Object { $_.Groups[2].Value }
+$imageRefs += [regex]::Matches($content, $htmlImgPattern) | ForEach-Object { $_.Groups[1].Value }
+$imageRefs = $imageRefs | Select-Object -Unique
 
 $ghToken = $null
 try { $ghToken = (gh auth token 2>$null) } catch {}
 
-foreach ($m in $imageMatches) {
-    $imgPath = $m.Groups[2].Value -replace '\s*"[^"]*"\s*$', '' # strip optional title
+foreach ($ref in $imageRefs) {
+    $imgPath = $ref -replace '\s*"[^"]*"\s*$', '' # strip optional title
     $imgPath = $imgPath.Trim()
 
     # Skip URLs and data URIs
@@ -165,7 +170,7 @@ foreach ($m in $imageMatches) {
     try {
         Invoke-RestMethod -Uri $uploadUri -Headers $ghHeaders -Method Put -Body ($uploadBody | ConvertTo-Json) -ContentType "application/json" | Out-Null
         $rawUrl = "https://raw.githubusercontent.com/bydynamics/shared-docs/main/$targetPath"
-        $content = $content.Replace($m.Groups[2].Value, $rawUrl)
+        $content = $content.Replace($ref, $rawUrl)
         Write-Host "  Image: $imgFileName -> $rawUrl" -ForegroundColor DarkGray
     } catch {
         Write-Warning "Failed to upload image '$imgFileName': $_"
